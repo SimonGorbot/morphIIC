@@ -1,0 +1,46 @@
+{
+  "device_name": "morphIIC P0",
+  "i2c_address_7bit": 66,
+  "addr_width_bits": 8,
+  "reg_count": 256,
+  "default_fill": 255,
+  "auto_increment": true,
+  "registers": [
+    {
+      "addr": 0,
+      "default": 18,
+      "access": "ro",
+      "name": "REG1"
+    },
+    {
+      "addr": 1,
+      "default": 52,
+      "access": "ro",
+      "name": "REG2"
+    },
+    {
+      "addr": 16,
+      "default": 0,
+      "access": "rw",
+      "name": "REG3"
+    },
+    {
+      "addr": 17,
+      "default": 0,
+      "access": "rw",
+      "name": "REG4"
+    },
+    {
+      "addr": 32,
+      "default": 160,
+      "access": "ro",
+      "name": "REG5"
+    },
+    {
+      "addr": 33,
+      "default": 161,
+      "access": "ro",
+      "name": "REG6"
+    }
+  ]
+}

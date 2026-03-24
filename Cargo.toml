@@ -2,6 +2,7 @@
 members = [
     "firmware",
     "tools/gen_model",
+    "tools/csv_streamer",
 ]
 resolver = "2"
 

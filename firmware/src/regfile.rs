@@ -1,4 +1,5 @@
 use crate::model::{AUTO_INCREMENT, Access, DEFAULT_FILL, REG_COUNT, REGISTERS};
+use crate::streams::{self, ReadEffect};
 
 pub struct RegisterFile {
     regs: [u8; REG_COUNT],
@@ -53,11 +54,17 @@ impl RegisterFile {
         accepted
     }
 
-    pub fn read_into(&mut self, out: &mut [u8]) {
+    pub fn read_into(&mut self, out: &mut [u8], effects: &mut [ReadEffect]) {
+        debug_assert!(effects.len() >= out.len());
+
         let mut ptr = self.pointer;
 
-        for byte in out {
-            *byte = self.regs[ptr as usize];
+        for idx in 0..out.len() {
+            let fallback = self.regs[ptr as usize];
+            let (value, effect) = streams::read_for_register(ptr, fallback);
+            out[idx] = value;
+            effects[idx] = effect;
+
             if AUTO_INCREMENT {
                 ptr = ptr.wrapping_add(1);
             }
@@ -66,9 +73,18 @@ impl RegisterFile {
         self.pointer = ptr;
     }
 
-    pub fn rewind_pointer(&mut self, count: usize) {
+    pub fn rollback_unread(&mut self, effects: &[ReadEffect], unread: usize) {
+        if unread == 0 {
+            return;
+        }
+
         if AUTO_INCREMENT {
-            self.pointer = self.pointer.wrapping_sub(count as u8);
+            self.pointer = self.pointer.wrapping_sub(unread as u8);
+        }
+
+        let rollback_start = effects.len().saturating_sub(unread);
+        for effect in effects[rollback_start..].iter().rev() {
+            streams::rollback_effect(*effect);
         }
     }
 }

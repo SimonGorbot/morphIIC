@@ -1,5 +1,5 @@
 {
-  "device_name": "morphIIC P0",
+  "device_name": "morphIIC",
   "i2c_address_7bit": 66,
   "addr_width_bits": 8,
   "reg_count": 256,
@@ -34,13 +34,21 @@
       "addr": 32,
       "default": 160,
       "access": "ro",
-      "name": "REG5"
+      "name": "REG5_EMBEDDED",
+      "csv": {
+        "path": "csv/reg5_embedded.csv",
+        "mode": "embedded"
+      }
     },
     {
       "addr": 33,
       "default": 161,
       "access": "ro",
-      "name": "REG6"
+      "name": "REG6_HOST_STREAM",
+      "csv": {
+        "path": "csv/reg6_host.csv",
+        "mode": "host_stream"
+      }
     }
   ]
 }

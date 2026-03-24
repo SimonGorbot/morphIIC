@@ -1,4 +1,4 @@
-use std::{env, fs::File, io::Write, path::PathBuf};
+use std::{env, fs, fs::File, io::Write, path::PathBuf};
 
 fn main() {
     let manifest_dir =
@@ -18,7 +18,15 @@ fn main() {
         )
     });
 
+    let model_text = fs::read_to_string(&model_json)
+        .unwrap_or_else(|err| panic!("failed to read {}: {err:#}", model_json.display()));
+    let parsed_model = gen_model::parse_model(&model_text)
+        .unwrap_or_else(|err| panic!("failed to parse {}: {err:#}", model_json.display()));
+
     println!("cargo:rerun-if-changed={}", model_json.display());
+    for csv_path in gen_model::resolve_csv_paths(&parsed_model, &model_json) {
+        println!("cargo:rerun-if-changed={}", csv_path.display());
+    }
     println!(
         "cargo:rerun-if-changed={}",
         workspace_dir.join("tools/gen_model/src/lib.rs").display()

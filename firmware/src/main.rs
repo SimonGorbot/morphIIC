@@ -4,7 +4,9 @@
 mod log;
 mod model;
 mod regfile;
+mod streams;
 
+use core::fmt::Write as _;
 use core::str;
 
 use embassy_executor::Spawner;
@@ -29,6 +31,8 @@ use heapless::String;
 use smart_leds::RGB8;
 use static_cell::StaticCell;
 
+use crate::streams::{FeedError, HostStreamDescriptor, HostStreamStatus, ReadEffect};
+
 use {defmt_rtt as _, panic_probe as _};
 
 // Bogus VID and PID.
@@ -36,17 +40,61 @@ use {defmt_rtt as _, panic_probe as _};
 const USB_VENDOR_ID: u16 = 0x1111;
 const USB_PRODUCT_ID: u16 = 0x2222;
 const USB_MAX_PACKET_SIZE: u16 = 64; // bytes
-const I2C_READ_CHUNK: usize = 16; // bytes
+const I2C_READ_CHUNK: usize = 1; // bytes; workaround for repeated LeftoverBytes path under single-byte master reads
 const HEARTBEAT_ON_MS: u64 = 200;
 const HEARTBEAT_OFF_MS: u64 = 800;
 
+const STREAM_PROTO_VERSION: u8 = 1;
+const STREAM_FRAME_HEADER_BYTES: usize = 3;
+const STREAM_RX_ACCUM_BYTES: usize = 512;
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum HostOp {
+    HelloReq = 0x01,
+    Feed = 0x02,
+    ResetStreams = 0x03,
+}
+
+impl TryFrom<u8> for HostOp {
+    type Error = u8;
+
+    fn try_from(value: u8) -> core::result::Result<Self, u8> {
+        match value {
+            x if x == Self::HelloReq as u8 => Ok(Self::HelloReq),
+            x if x == Self::Feed as u8 => Ok(Self::Feed),
+            x if x == Self::ResetStreams as u8 => Ok(Self::ResetStreams),
+            _ => Err(value),
+        }
+    }
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum DeviceOp {
+    HelloResp = 0x81,
+    FeedAck = 0x82,
+    ResetAck = 0x83,
+    Error = 0xFF,
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum StreamError {
+    BadFrame = 1,
+    BadPayload = 2,
+    InvalidStreamId = 3,
+    UnknownOpcode = 4,
+}
+
 static I2C_RESET_SIGNAL: Signal<ThreadModeRawMutex, ()> = Signal::new();
 
-static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
+static USB_CONFIG_DESCRIPTOR: StaticCell<[u8; 512]> = StaticCell::new();
 static USB_BOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
-static USB_MSOS_DESCRIPTOR: StaticCell<[u8; 128]> = StaticCell::new();
+static USB_MSOS_DESCRIPTOR: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
-static USB_CDC_STATE: StaticCell<CdcAcmState<'static>> = StaticCell::new();
+static USB_CLI_CDC_STATE: StaticCell<CdcAcmState<'static>> = StaticCell::new();
+static USB_STREAM_CDC_STATE: StaticCell<CdcAcmState<'static>> = StaticCell::new();
 static LOG_SNAPSHOT: StaticCell<[log::Event; log::RING_CAPACITY]> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
@@ -74,7 +122,7 @@ async fn usb_cli_task(mut class: CdcAcmClass<'static, UsbDriver>) -> ! {
         class.wait_connection().await;
         let _ = usb_write_line(
             &mut class,
-            "morphIIC ready. Commands: dump, reset_i2c, clear, help",
+            "morphIIC ready. Commands: dump, reset_i2c, clear, stream_status, help",
         )
         .await;
 
@@ -106,6 +154,168 @@ async fn usb_cli_task(mut class: CdcAcmClass<'static, UsbDriver>) -> ! {
     }
 }
 
+#[embassy_executor::task]
+async fn usb_stream_task(mut class: CdcAcmClass<'static, UsbDriver>) -> ! {
+    let mut rx_packet = [0u8; USB_MAX_PACKET_SIZE as usize];
+    let mut accum = [0u8; STREAM_RX_ACCUM_BYTES];
+    let mut accum_len: usize;
+
+    loop {
+        class.wait_connection().await;
+        accum_len = 0;
+
+        'connection: loop {
+            let packet_len = match class.read_packet(&mut rx_packet).await {
+                Ok(n) => n,
+                Err(_) => break 'connection,
+            };
+
+            if packet_len == 0 {
+                continue;
+            }
+
+            if accum_len + packet_len > accum.len() {
+                accum_len = 0;
+                if stream_send_error(&mut class, StreamError::BadFrame)
+                    .await
+                    .is_err()
+                {
+                    break 'connection;
+                }
+                continue;
+            }
+
+            accum[accum_len..accum_len + packet_len].copy_from_slice(&rx_packet[..packet_len]);
+            accum_len += packet_len;
+
+            loop {
+                if accum_len < STREAM_FRAME_HEADER_BYTES {
+                    break;
+                }
+
+                let payload_len = u16::from_le_bytes([accum[1], accum[2]]) as usize;
+                let frame_len = STREAM_FRAME_HEADER_BYTES + payload_len;
+
+                if frame_len > accum.len() {
+                    accum_len = 0;
+                    if stream_send_error(&mut class, StreamError::BadFrame)
+                        .await
+                        .is_err()
+                    {
+                        break 'connection;
+                    }
+                    break;
+                }
+
+                if accum_len < frame_len {
+                    break;
+                }
+
+                if process_stream_frame(
+                    accum[0],
+                    &accum[STREAM_FRAME_HEADER_BYTES..frame_len],
+                    &mut class,
+                )
+                .await
+                .is_err()
+                {
+                    break 'connection;
+                }
+
+                accum.copy_within(frame_len..accum_len, 0);
+                accum_len -= frame_len;
+            }
+        }
+    }
+}
+
+async fn process_stream_frame(
+    opcode: u8,
+    payload: &[u8],
+    class: &mut CdcAcmClass<'static, UsbDriver>,
+) -> Result<(), EndpointError> {
+    let Ok(opcode) = HostOp::try_from(opcode) else {
+        return stream_send_error(class, StreamError::UnknownOpcode).await;
+    };
+
+    match opcode {
+        HostOp::HelloReq => {
+            let mut descriptors = [HostStreamDescriptor {
+                stream_id: 0,
+                addr: 0,
+                capacity: 0,
+            }; streams::MAX_STATUS_STREAMS];
+            let count = streams::descriptors(&mut descriptors);
+
+            let mut out = [0u8; 2 + streams::MAX_STATUS_STREAMS * 4];
+            out[0] = STREAM_PROTO_VERSION;
+            out[1] = count as u8;
+
+            let mut w = 2;
+            for descriptor in &descriptors[..count] {
+                out[w] = descriptor.stream_id;
+                out[w + 1] = descriptor.addr;
+                out[w + 2] = (descriptor.capacity & 0xFF) as u8;
+                out[w + 3] = (descriptor.capacity >> 8) as u8;
+                w += 4;
+            }
+
+            stream_send_frame(class, DeviceOp::HelloResp, &out[..w]).await
+        }
+        HostOp::Feed => {
+            if payload.is_empty() {
+                return stream_send_error(class, StreamError::BadPayload).await;
+            }
+
+            let stream_id = payload[0];
+            let data = &payload[1..];
+
+            match streams::feed(stream_id, data) {
+                Ok(result) => {
+                    let accepted = result.accepted.min(u16::MAX as usize) as u16;
+                    let free = result.free.min(u16::MAX as usize) as u16;
+                    let ack = [
+                        stream_id,
+                        (accepted & 0xFF) as u8,
+                        (accepted >> 8) as u8,
+                        (free & 0xFF) as u8,
+                        (free >> 8) as u8,
+                    ];
+                    stream_send_frame(class, DeviceOp::FeedAck, &ack).await
+                }
+                Err(FeedError::InvalidStreamId) => {
+                    stream_send_error(class, StreamError::InvalidStreamId).await
+                }
+            }
+        }
+        HostOp::ResetStreams => {
+            if !payload.is_empty() {
+                return stream_send_error(class, StreamError::BadPayload).await;
+            }
+            streams::reset_all();
+            stream_send_frame(class, DeviceOp::ResetAck, &[]).await
+        }
+    }
+}
+
+async fn stream_send_error(
+    class: &mut CdcAcmClass<'static, UsbDriver>,
+    code: StreamError,
+) -> Result<(), EndpointError> {
+    stream_send_frame(class, DeviceOp::Error, &[code as u8]).await
+}
+
+async fn stream_send_frame(
+    class: &mut CdcAcmClass<'static, UsbDriver>,
+    opcode: DeviceOp,
+    payload: &[u8],
+) -> Result<(), EndpointError> {
+    let len = payload.len().min(u16::MAX as usize) as u16;
+    let header = [opcode as u8, (len & 0xFF) as u8, (len >> 8) as u8];
+    usb_write_all(class, &header).await?;
+    usb_write_all(class, payload).await
+}
+
 // TODO: Try implementing a force NACK command. This would involve disabling the i2c peripheral, setting `IC_SLV_DATA_NACK_ONLY`, then re-enabling.
 // There is no way to force a NACK from the RP2040 without following the procedure above due to peripheral limitations. See pg. 496 of rp2040 ds: https://pip-assets.raspberrypi.com/categories/814-rp2040/documents/RP-008371-DS-1-rp2040-datasheet.pdf
 async fn handle_cli_command(
@@ -123,9 +333,10 @@ async fn handle_cli_command(
 
     if line.eq_ignore_ascii_case("help") {
         let _ = usb_write_line(class, "Commands:").await;
-        let _ = usb_write_line(class, "  dump      -> dump I2C transaction log ring").await;
-        let _ = usb_write_line(class, "  reset_i2c -> reset RP2040 I2C peripheral").await;
-        let _ = usb_write_line(class, "  clear     -> clear transaction ring").await;
+        let _ = usb_write_line(class, "  dump          -> dump I2C transaction log ring").await;
+        let _ = usb_write_line(class, "  reset_i2c     -> reset RP2040 I2C peripheral").await;
+        let _ = usb_write_line(class, "  clear         -> clear transaction ring").await;
+        let _ = usb_write_line(class, "  stream_status -> show host stream buffer status").await;
         return;
     }
 
@@ -156,6 +367,52 @@ async fn handle_cli_command(
     if line.eq_ignore_ascii_case("reset_i2c") {
         I2C_RESET_SIGNAL.signal(());
         let _ = usb_write_line(class, "i2c reset requested").await;
+        return;
+    }
+
+    if line.eq_ignore_ascii_case("stream_status") {
+        let mut statuses = [HostStreamStatus {
+            stream_id: 0,
+            addr: 0,
+            level: 0,
+            free: 0,
+            underruns: 0,
+            drops: 0,
+            has_last: false,
+            last_value: 0,
+        }; streams::MAX_STATUS_STREAMS];
+        let count = streams::statuses(&mut statuses);
+
+        if count == 0 {
+            let _ = usb_write_line(class, "no host_stream registers configured").await;
+            return;
+        }
+
+        let mut line_buf: String<192> = String::new();
+        let _ = usb_write_line(class, "--- stream status ---").await;
+        for status in &statuses[..count] {
+            line_buf.clear();
+            let _ = write!(
+                line_buf,
+                "id={} addr=0x{:02X} fill={}/{} free={} underruns={} drops={} ",
+                status.stream_id,
+                status.addr,
+                status.level,
+                model::HOST_STREAM_BUFFER_CAPACITY,
+                status.free,
+                status.underruns,
+                status.drops,
+            );
+
+            if status.has_last {
+                let _ = write!(line_buf, "last=0x{:02X}", status.last_value);
+            } else {
+                let _ = line_buf.push_str("last=--");
+            }
+
+            let _ = usb_write_line(class, line_buf.as_str()).await;
+        }
+
         return;
     }
 
@@ -265,12 +522,13 @@ async fn serve_read(
 ) {
     let pointer = regfile.pointer();
     let mut tx = [0u8; I2C_READ_CHUNK];
-    let mut total = 0usize;
+    let mut effects = [ReadEffect::None; I2C_READ_CHUNK];
+    let mut total = 0;
     let mut preview = [0u8; 8];
-    let mut preview_len = 0usize;
+    let mut preview_len = 0;
 
     loop {
-        regfile.read_into(&mut tx);
+        regfile.read_into(&mut tx, &mut effects);
 
         if preview_len < preview.len() {
             let to_copy = (preview.len() - preview_len).min(tx.len());
@@ -286,12 +544,16 @@ async fn serve_read(
                 log::record(kind, pointer, total, 0, 0, &preview[..preview_len]);
                 return;
             }
-            // Undecided on how this branch should be treated. Any I2C read that does not read the entire 16 byte chunk will be a `LeftoverBytes` status.
             // Currently, the number of leftover bytes is stored in the error value of the log and the unread data in the chunk is shown in payload.
             // TODO: Consider how this branch should be handled
+            // More: Yep this caused major issues when only reading one byte from the master in quick succession. Going to need to find a better way to queue the appropriate number of bytes.
             Ok(i2c_slave::ReadStatus::LeftoverBytes(leftover)) => {
-                regfile.rewind_pointer(leftover as usize);
-                let real_len = total.saturating_sub(leftover as usize);
+                let unread = leftover as usize;
+                regfile.rollback_unread(&effects, unread);
+                let real_len = total.saturating_sub(unread);
+                if real_len < preview_len {
+                    preview_len = real_len;
+                }
                 log::record(
                     kind,
                     pointer,
@@ -384,22 +646,27 @@ async fn main(spawner: Spawner) {
     usb_config.max_power = 100;
     usb_config.max_packet_size_0 = 64;
 
-    let cdc_state = USB_CDC_STATE.init(CdcAcmState::new());
+    let cli_cdc_state = USB_CLI_CDC_STATE.init(CdcAcmState::new());
+    let stream_cdc_state = USB_STREAM_CDC_STATE.init(CdcAcmState::new());
     let mut builder = Builder::new(
         usb_driver,
         usb_config,
-        USB_CONFIG_DESCRIPTOR.init([0; 256]),
+        USB_CONFIG_DESCRIPTOR.init([0; 512]),
         USB_BOS_DESCRIPTOR.init([0; 256]),
-        USB_MSOS_DESCRIPTOR.init([0; 128]),
+        USB_MSOS_DESCRIPTOR.init([0; 256]),
         USB_CONTROL_BUF.init([0; 64]),
     );
 
-    let cdc = CdcAcmClass::new(&mut builder, cdc_state, USB_MAX_PACKET_SIZE);
+    let cli_cdc = CdcAcmClass::new(&mut builder, cli_cdc_state, USB_MAX_PACKET_SIZE);
+    let stream_cdc = CdcAcmClass::new(&mut builder, stream_cdc_state, USB_MAX_PACKET_SIZE);
     let usb = builder.build();
+
+    streams::init();
 
     spawner.spawn(i2c_slave_task(slave)).unwrap();
     spawner.spawn(usb_device_task(usb)).unwrap();
-    spawner.spawn(usb_cli_task(cdc)).unwrap();
+    spawner.spawn(usb_cli_task(cli_cdc)).unwrap();
+    spawner.spawn(usb_stream_task(stream_cdc)).unwrap();
     spawner.spawn(heartbeat_task(heartbeat_led)).unwrap();
 
     // Keep main alive so remaining PIO handles don't get dropped while SM0 drives WS2812.

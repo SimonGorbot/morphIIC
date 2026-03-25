@@ -1,0 +1,7 @@
+# Embedded register test pattern (wraps in firmware)
+0xA0
+0xA1
+0xA2
+0xA3
+0xA4
+255

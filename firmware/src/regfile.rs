@@ -1,4 +1,4 @@
-use crate::model::{AUTO_INCREMENT, Access, DEFAULT_FILL, REG_COUNT, REGISTERS};
+use crate::model::{AUTO_INCREMENT, Access, CSV_INDEX_BY_ADDR, DEFAULT_FILL, REG_COUNT, REGISTERS};
 use crate::streams::{self, ReadEffect};
 
 pub struct RegisterFile {
@@ -32,6 +32,17 @@ impl RegisterFile {
 
     pub fn set_pointer(&mut self, pointer: u8) {
         self.pointer = pointer;
+    }
+
+    pub fn reset_non_csv_to_defaults(&mut self) {
+        for reg in REGISTERS {
+            let idx = reg.addr as usize;
+            if CSV_INDEX_BY_ADDR[idx] >= 0 {
+                continue;
+            }
+            self.regs[idx] = reg.default;
+        }
+        self.pointer = 0;
     }
 
     pub fn write_payload(&mut self, payload: &[u8]) -> usize {

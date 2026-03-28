@@ -79,7 +79,7 @@ async fn main(spawner: Spawner) {
 
     let mut i2c_cfg = i2c_slave::Config::default();
     i2c_cfg.addr = model::I2C_ADDRESS_7BIT as u16;
-    i2c_cfg.general_call = false;
+    i2c_cfg.general_call = true;
     // TODO: Make pull-ups part of the device config
     i2c_cfg.scl_pullup = true;
     i2c_cfg.sda_pullup = true;

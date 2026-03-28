@@ -1,15 +1,10 @@
 use embassy_futures::select::{Either, select};
-use embassy_rp::{
-    i2c::AbortReason,
-    i2c_slave,
-    peripherals::I2C1,
-};
+use embassy_rp::{i2c::AbortReason, i2c_slave, peripherals::I2C1};
 use embassy_sync::{blocking_mutex::raw::ThreadModeRawMutex, signal::Signal};
 
-use crate::{
-    I2C_READ_CHUNK, log, regfile,
-    streams::ReadEffect,
-};
+use crate::{I2C_READ_CHUNK, log, regfile, streams::ReadEffect};
+
+const GENERAL_CALL_RESET: u8 = 0x06;
 
 static I2C_RESET_SIGNAL: Signal<ThreadModeRawMutex, ()> = Signal::new();
 
@@ -66,13 +61,21 @@ pub async fn task(mut slave: i2c_slave::I2cSlave<'static, I2C1>) -> ! {
                 serve_read(&mut slave, &mut regfile, log::EventKind::Read).await;
             }
             Either::Second(Ok(i2c_slave::Command::GeneralCall(len))) => {
+                let payload_len = len.min(listen_buf.len());
+                let payload = &listen_buf[..payload_len];
+                let handled_reset = payload.first().copied() == Some(GENERAL_CALL_RESET);
+                if handled_reset {
+                    slave.reset();
+                    regfile.reset_non_csv_to_defaults();
+                }
+
                 log::record(
                     log::EventKind::GeneralCall,
                     regfile.pointer(),
-                    len,
+                    payload_len,
+                    handled_reset as u8,
                     0,
-                    0,
-                    &listen_buf[..len.min(listen_buf.len())],
+                    payload,
                 );
             }
             Either::Second(Err(err)) => {

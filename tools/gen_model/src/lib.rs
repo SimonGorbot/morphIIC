@@ -10,6 +10,7 @@ pub const HOST_STREAM_BUFFER_CAPACITY: usize = 2048;
 pub const EMBEDDED_CSV_BUDGET_BYTES: usize = 32768;
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DeviceModel {
     pub device_name: String,
     pub i2c_address_7bit: u8,
@@ -118,13 +119,7 @@ fn validate(model: &DeviceModel) -> Result<()> {
 }
 
 pub fn parse_model(model_json: &str) -> Result<DeviceModel> {
-    let root: serde_json::Value = serde_json::from_str(model_json).context("parsing model JSON")?;
-    ensure!(
-        root.get("embedded_csv_budget_bytes").is_none(),
-        "embedded_csv_budget_bytes is not configurable; embedded CSV budget is hard-set to {} bytes",
-        EMBEDDED_CSV_BUDGET_BYTES
-    );
-    let model: DeviceModel = serde_json::from_value(root).context("parsing model JSON")?;
+    let model: DeviceModel = serde_json::from_str(model_json).context("parsing model JSON")?;
     validate(&model)?;
     Ok(model)
 }

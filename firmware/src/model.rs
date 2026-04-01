@@ -10,6 +10,8 @@ pub const DEFAULT_FILL: u8 = 0xFF;
 pub const AUTO_INCREMENT: bool = true;
 pub const MAX_HOST_STREAM_REGS: usize = 9;
 pub const HOST_STREAM_BUFFER_CAPACITY: usize = 2048;
+pub const EMBEDDED_CSV_BUDGET_BYTES: usize = 32768;
+pub const EMBEDDED_CSV_TOTAL_BYTES: usize = 6;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Access {

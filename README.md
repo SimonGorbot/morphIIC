@@ -22,6 +22,9 @@ Per-register CSV sources are optional:
 
 - `csv.mode = "embedded"`: samples are compiled into firmware and wrap on EOF.
 - `csv.mode = "host_stream"`: samples are fed at runtime over USB stream channel.
+- Embedded CSV data has a cumulative byte budget across all `embedded` registers:
+  - hard-set budget: `32768` bytes (`32 KiB`)
+  - generator fails early if the cumulative embedded payload exceeds budget, with per-register byte breakdown
 
 Example register entry:
 

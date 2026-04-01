@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 pub const MAX_HOST_STREAM_REGS: usize = 9;
 pub const HOST_STREAM_BUFFER_CAPACITY: usize = 2048;
+pub const EMBEDDED_CSV_BUDGET_BYTES: usize = 32768;
 
 #[derive(Debug, Deserialize)]
 pub struct DeviceModel {
@@ -117,7 +118,13 @@ fn validate(model: &DeviceModel) -> Result<()> {
 }
 
 pub fn parse_model(model_json: &str) -> Result<DeviceModel> {
-    let model: DeviceModel = serde_json::from_str(model_json).context("parsing model JSON")?;
+    let root: serde_json::Value = serde_json::from_str(model_json).context("parsing model JSON")?;
+    ensure!(
+        root.get("embedded_csv_budget_bytes").is_none(),
+        "embedded_csv_budget_bytes is not configurable; embedded CSV budget is hard-set to {} bytes",
+        EMBEDDED_CSV_BUDGET_BYTES
+    );
+    let model: DeviceModel = serde_json::from_value(root).context("parsing model JSON")?;
     validate(&model)?;
     Ok(model)
 }
@@ -224,7 +231,48 @@ fn resolve_csv_specs(model: &DeviceModel, model_path: &Path) -> Result<Vec<Resol
     }
 
     specs.sort_by_key(|spec| spec.addr);
+    enforce_embedded_csv_budget(&specs)?;
     Ok(specs)
+}
+
+fn enforce_embedded_csv_budget(csv_specs: &[ResolvedCsvSpec]) -> Result<()> {
+    let budget = EMBEDDED_CSV_BUDGET_BYTES;
+    let mut total = 0usize;
+    let mut per_register = Vec::new();
+
+    for spec in csv_specs {
+        if !matches!(spec.mode, CsvModeDef::Embedded) {
+            continue;
+        }
+
+        let len = spec.data.len();
+        total = total.checked_add(len).with_context(|| {
+            format!(
+                "embedded CSV size overflow while summing register 0x{:02X}",
+                spec.addr
+            )
+        })?;
+        per_register.push((spec.addr, len));
+    }
+
+    if total <= budget {
+        return Ok(());
+    }
+
+    let over = total - budget;
+    let breakdown = per_register
+        .into_iter()
+        .map(|(addr, len)| format!("0x{:02X}:{}B", addr, len))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    bail!(
+        "embedded CSV payload exceeds budget: {} bytes total (budget {} bytes, over by {} bytes). Per-register embedded sizes: {}. Reduce embedded CSV sizes or switch registers to host_stream.",
+        total,
+        budget,
+        over,
+        breakdown
+    );
 }
 
 fn render_i16_array(out: &mut String, values: &[i16]) {
@@ -259,6 +307,11 @@ fn render_csv_data_const(out: &mut String, idx: usize, values: &[u8]) {
 
 fn generate_model_rs(model: &DeviceModel, csv_specs: &[ResolvedCsvSpec]) -> String {
     let mut out = String::new();
+    let embedded_csv_total_bytes: usize = csv_specs
+        .iter()
+        .filter(|spec| matches!(spec.mode, CsvModeDef::Embedded))
+        .map(|spec| spec.data.len())
+        .sum();
 
     let mut registers = model.registers.clone();
     registers.sort_by_key(|r| r.addr);
@@ -318,6 +371,16 @@ fn generate_model_rs(model: &DeviceModel, csv_specs: &[ResolvedCsvSpec]) -> Stri
         out,
         "pub const HOST_STREAM_BUFFER_CAPACITY: usize = {};",
         HOST_STREAM_BUFFER_CAPACITY
+    );
+    let _ = writeln!(
+        out,
+        "pub const EMBEDDED_CSV_BUDGET_BYTES: usize = {};",
+        EMBEDDED_CSV_BUDGET_BYTES
+    );
+    let _ = writeln!(
+        out,
+        "pub const EMBEDDED_CSV_TOTAL_BYTES: usize = {};",
+        embedded_csv_total_bytes
     );
     let _ = writeln!(out);
     let _ = writeln!(out, "#[derive(Copy, Clone, Debug, Eq, PartialEq)]");

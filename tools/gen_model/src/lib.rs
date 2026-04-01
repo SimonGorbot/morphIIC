@@ -22,6 +22,7 @@ pub struct DeviceModel {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct RegisterDef {
     pub addr: u16,
     pub default: u8,
@@ -33,6 +34,7 @@ pub struct RegisterDef {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct CsvSourceDef {
     pub path: String,
     pub mode: CsvModeDef,

@@ -14,9 +14,15 @@ RP2040 firmware emulates an I2C register-mapped device using Embassy I2C slave. 
 
 Primary model: `models/device_model.json`.
 
-Hard rule enforced by generator:
+Hard rules enforced by generator:
 
-- `addr_width_bits` must be `8`.
+- `i2c_address_7bit` must be in `0x08..=0x77` (`0x00..=0x07` and `0x78..=0x7F` are reserved).
+- Register space is fixed to 8-bit addressed (`0..255`).
+
+I2C bus behavior in the device model:
+
+- `i2c_internal_pullups`: enables or disables RP2040 internal pull-ups on SDA/SCL.
+- `i2c_respond_to_general_call`: controls whether the device responds to I2C general call.
 
 Per-register CSV sources are optional:
 
@@ -82,7 +88,7 @@ cargo run -p csv_streamer -- /dev/ttyACM0 models/device_model.json
 - Sends `HELLO` to discover stream slots.
 - Prefills each stream buffer to 75% by default.
 - Keeps buffers above 50% data mark.
-- CSV playback wraps on EOF.
+- CSV playback wraps on end of file.
 
 ## Current limitations
 

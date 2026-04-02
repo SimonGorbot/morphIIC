@@ -1,0 +1,12 @@
+{
+  "device_name": "invalid_duplicate",
+  "i2c_address_7bit": 66,
+  "default_fill": 0,
+  "auto_increment": true,
+  "i2c_internal_pullups": true,
+  "i2c_respond_to_general_call": true,
+  "registers": [
+    { "addr": 2, "default": 0, "access": "ro", "name": "A" },
+    { "addr": 2, "default": 1, "access": "rw", "name": "B" }
+  ]
+}

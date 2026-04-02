@@ -1,0 +1,10 @@
+{
+  "device_name": "invalid_unknown",
+  "i2c_address_7bit": 66,
+  "default_fill": 0,
+  "auto_increment": true,
+  "i2c_internal_pullups": true,
+  "i2c_respond_to_general_call": true,
+  "registers": [],
+  "unexpected": true
+}

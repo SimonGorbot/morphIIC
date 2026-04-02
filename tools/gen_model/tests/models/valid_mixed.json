@@ -1,0 +1,42 @@
+{
+  "device_name": "test_device",
+  "i2c_address_7bit": 66,
+  "default_fill": 255,
+  "auto_increment": true,
+  "i2c_internal_pullups": true,
+  "i2c_respond_to_general_call": true,
+  "registers": [
+    {
+      "addr": 32,
+      "default": 160,
+      "access": "ro",
+      "name": "EMBEDDED",
+      "csv": {
+        "path": "csv/embedded.csv",
+        "mode": "embedded"
+      }
+    },
+    {
+      "addr": 17,
+      "default": 161,
+      "access": "ro",
+      "name": "HOST",
+      "csv": {
+        "path": "csv/host.csv",
+        "mode": "host_stream"
+      }
+    },
+    {
+      "addr": 1,
+      "default": 52,
+      "access": "ro",
+      "name": "ID1"
+    },
+    {
+      "addr": 16,
+      "default": 0,
+      "access": "rw",
+      "name": "RW0"
+    }
+  ]
+}

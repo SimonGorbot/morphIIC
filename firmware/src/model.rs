@@ -4,7 +4,8 @@
 
 pub const DEVICE_NAME: &str = "morphIIC";
 pub const I2C_ADDRESS_7BIT: u8 = 0x42;
-pub const ADDR_WIDTH_BITS: u8 = 8;
+pub const I2C_INTERNAL_PULLUPS: bool = true;
+pub const I2C_RESPOND_TO_GENERAL_CALL: bool = true;
 pub const REG_COUNT: usize = 256;
 pub const DEFAULT_FILL: u8 = 0xFF;
 pub const AUTO_INCREMENT: bool = true;

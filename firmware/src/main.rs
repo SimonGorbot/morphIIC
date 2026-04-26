@@ -90,9 +90,9 @@ async fn main(spawner: Spawner) {
     let usb_driver = Driver::new(p.USB, Irqs);
 
     let mut usb_config = UsbConfig::new(USB_VENDOR_ID, USB_PRODUCT_ID);
-    usb_config.manufacturer = Some("morphIIC");
+    usb_config.manufacturer = Some("mimIIC");
     usb_config.product = Some(model::DEVICE_NAME);
-    usb_config.serial_number = Some("morphiic-p0");
+    usb_config.serial_number = Some("mimiic-p0");
     usb_config.max_power = 100;
     usb_config.max_packet_size_0 = 64;
 

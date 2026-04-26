@@ -1,10 +1,10 @@
-# morphIIC initial prototype
+# mimIIC initial prototype
 
 RP2040 firmware emulates an I2C register-mapped device using Embassy I2C slave. Register behavior is generated from JSON.
 
 ## Wiring
 
-### RP2040 (morphIIC)
+### RP2040 (mimIIC)
 
 - I2C1 SCL: `GP3`
 - I2C1 SDA: `GP2`
@@ -55,11 +55,11 @@ CSV parsing rules:
 
 ## Build RP2040 firmware
 
-From repo root (`morphIIC/`):
+From repo root (`mimIIC/`):
 
 ```bash
 cargo run -p gen_model -- models/device_model.json firmware/src/model.rs
-cargo build -p morphiic-firmware --release --target thumbv6m-none-eabi
+cargo build -p mimiic-firmware --release --target thumbv6m-none-eabi
 ```
 
 `firmware/build.rs` also regenerates `firmware/src/model.rs` automatically on build and tracks referenced CSV files as rebuild inputs.

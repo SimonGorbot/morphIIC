@@ -1,5 +1,5 @@
 {
-  "device_name": "morphIIC",
+  "device_name": "mimIIC",
   "i2c_address_7bit": 66,
   "default_fill": 255,
   "auto_increment": true,

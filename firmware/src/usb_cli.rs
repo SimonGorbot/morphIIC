@@ -26,7 +26,7 @@ pub async fn task(mut class: CdcAcmClass<'static, UsbDriver>) -> ! {
         class.wait_connection().await;
         let _ = usb_write_line(
             &mut class,
-            "morphIIC ready. Commands: dump, reset_i2c, clear, stream_status, help",
+            "mimIIC ready. Commands: dump, reset_i2c, clear, stream_status, help",
         )
         .await;
 

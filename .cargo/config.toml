@@ -3,9 +3,9 @@
 runner = "elf2uf2-rs --deploy --serial --verbose" # for elf2uf2
 
 [alias]
-build-fw = "build -p morphiic-firmware --target thumbv6m-none-eabi"
-check-fw = "check -p morphiic-firmware --target thumbv6m-none-eabi"
-run-fw = "run -p morphiic-firmware --target thumbv6m-none-eabi"
+build-fw = "build -p mimiic-firmware --target thumbv6m-none-eabi"
+check-fw = "check -p mimiic-firmware --target thumbv6m-none-eabi"
+run-fw = "run -p mimiic-firmware --target thumbv6m-none-eabi"
 
 [env]
 DEFMT_LOG = "debug"

@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-pub const DEVICE_NAME: &str = "morphIIC";
+pub const DEVICE_NAME: &str = "mimIIC";
 pub const I2C_ADDRESS_7BIT: u8 = 0x42;
 pub const I2C_INTERNAL_PULLUPS: bool = true;
 pub const I2C_RESPOND_TO_GENERAL_CALL: bool = true;

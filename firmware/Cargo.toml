@@ -1,5 +1,5 @@
 [package]
-name = "morphiic-firmware"
+name = "mimiic-firmware"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85.0"
@@ -26,6 +26,6 @@ smart-leds = "0.4.0"
 gen_model = { path = "../tools/gen_model" }
 
 [[bin]]
-name = "morphiic-firmware"
+name = "mimiic-firmware"
 test = false
 bench = false
